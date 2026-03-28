@@ -127,6 +127,37 @@ Open:
 
 ---
 
+## ▲ Deploying to Vercel
+
+Vite **inlines** `VITE_*` variables when `npm run build` runs. Vercel does **not** use your machine’s `.env.local`, so you must set the Convex URL in the Vercel UI (or the build stays without it and the site shows “Convex URL missing”).
+
+### 1. Convex URL
+
+Use the **same** URL you use locally: `https://<deployment-name>.convex.cloud` (from `npx convex dev`, `.env.local`, or [Convex Dashboard](https://dashboard.convex.dev) → your deployment).
+
+For a **production** Convex backend, run `npx convex deploy` and use the **production** deployment URL if it differs from dev.
+
+### 2. Vercel environment variable
+
+1. Vercel → your project → **Settings** → **Environment Variables**
+2. Add:
+   - **Name:** `VITE_CONVEX_URL`
+   - **Value:** `https://<your-deployment>.convex.cloud`
+3. Apply to **Production** and **Preview** (and **Development** if you use Vercel CLI for builds)
+4. **Redeploy** the latest deployment (or trigger a new build) so the variable is present **during** `npm run build`
+
+Without a redeploy after adding the variable, old bundles still lack the URL.
+
+### 3. Build settings (defaults)
+
+- **Framework preset:** Vite  
+- **Build command:** `npm run build`  
+- **Output directory:** `dist`
+
+No extra `vercel.json` is required for a standard static Vite app.
+
+---
+
 ## 🎬 Demo Walkthrough
 
 ### 1. Sign Up
