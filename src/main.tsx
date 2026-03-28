@@ -1,8 +1,12 @@
 import { ConvexProvider, ConvexReactClient } from 'convex/react'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import './index.css'
+import './motion.css'
 import App from './App.tsx'
+import { OfficerSessionProvider } from './officer/OfficerSessionContext.tsx'
+import { OfficerShell } from './officer/OfficerShell.tsx'
 import { RootErrorBoundary } from './RootErrorBoundary.tsx'
 
 const convexUrl = import.meta.env.VITE_CONVEX_URL
@@ -31,7 +35,19 @@ if (!convexUrl) {
     <StrictMode>
       <RootErrorBoundary>
         <ConvexProvider client={convex}>
-          <App />
+          <BrowserRouter>
+            <Routes>
+              <Route
+                path="/dashboard/*"
+                element={
+                  <OfficerSessionProvider>
+                    <OfficerShell />
+                  </OfficerSessionProvider>
+                }
+              />
+              <Route path="/*" element={<App />} />
+            </Routes>
+          </BrowserRouter>
         </ConvexProvider>
       </RootErrorBoundary>
     </StrictMode>,

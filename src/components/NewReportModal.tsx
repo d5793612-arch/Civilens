@@ -39,6 +39,9 @@ export function NewReportModal({ open, onClose, sessionToken, onSuccess }: NewRe
   const [department, setDepartment] = useState<string>(DEPARTMENTS[0])
   const [severity, setSeverity] = useState<Severity>('Medium')
   const [location, setLocation] = useState('')
+  const [lat, setLat] = useState<number | undefined>()
+  const [lng, setLng] = useState<number | undefined>()
+  const [geoLoading, setGeoLoading] = useState(false)
   const [previews, setPreviews] = useState<Preview[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -49,6 +52,9 @@ export function NewReportModal({ open, onClose, sessionToken, onSuccess }: NewRe
     setDepartment(DEPARTMENTS[0])
     setSeverity('Medium')
     setLocation('')
+    setLat(undefined)
+    setLng(undefined)
+    setGeoLoading(false)
     setPreviews((p) => {
       p.forEach((x) => URL.revokeObjectURL(x.url))
       return []
@@ -95,6 +101,52 @@ export function NewReportModal({ open, onClose, sessionToken, onSuccess }: NewRe
     }
     if (next.length) setPreviews((p) => [...p, ...next])
     if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  const reverseGeocode = async (latitude: number, longitude: number): Promise<string> => {
+    const url = `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'Accept-Language': 'en',
+      },
+    })
+    if (!res.ok) return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+    const j = (await res.json()) as { display_name?: string }
+    return j.display_name ?? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+  }
+
+  const fillLocationFromDevice = () => {
+    setError(null)
+    if (!navigator.geolocation) {
+      setError('Geolocation is not supported in this browser.')
+      return
+    }
+    setGeoLoading(true)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const { latitude, longitude } = pos.coords
+        setLat(latitude)
+        setLng(longitude)
+        try {
+          const label = await reverseGeocode(latitude, longitude)
+          setLocation(label)
+        } catch {
+          setLocation(`${latitude.toFixed(5)}, ${longitude.toFixed(5)}`)
+        } finally {
+          setGeoLoading(false)
+        }
+      },
+      (err) => {
+        setGeoLoading(false)
+        if (err.code === 1) {
+          setError('Location permission denied. Enable it in the browser or enter an address manually.')
+        } else {
+          setError('Could not read your location. Try again or type the address.')
+        }
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 60_000 },
+    )
   }
 
   const removePreview = (url: string) => {
@@ -146,15 +198,23 @@ export function NewReportModal({ open, onClose, sessionToken, onSuccess }: NewRe
         storageIds.push(sid as Id<'_storage'>)
       }
 
-      await submitReport({
+      const result = await submitReport({
         sessionToken,
         issueType: t,
         description: descriptionForApi,
         department,
         severity,
         location: location.trim(),
+        lat,
+        lng,
         storageIds: storageIds.length ? storageIds : undefined,
       })
+
+      if (result.duplicateOfComplaintId) {
+        window.alert(
+          `Report filed. Our system flagged a possible duplicate of ${result.duplicateOfComplaintId} (similar details or nearby GPS). You can still track this new ID: ${result.id}.`,
+        )
+      }
 
       onSuccess?.()
       reset()
@@ -258,17 +318,35 @@ export function NewReportModal({ open, onClose, sessionToken, onSuccess }: NewRe
             </label>
           </div>
 
-          <label className="cc-form-field">
+          <div className="cc-form-field">
             <span className="cc-form-field__label">Location / landmark (optional)</span>
-            <input
-              className="cc-input"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Address, ward, or map pin reference"
-              maxLength={500}
-              autoComplete="street-address"
-            />
-          </label>
+            <div className="cc-location-row">
+              <input
+                className="cc-input cc-location-row__input"
+                value={location}
+                onChange={(e) => {
+                  setLocation(e.target.value)
+                  setLat(undefined)
+                  setLng(undefined)
+                }}
+                placeholder="Address, ward, or map pin reference"
+                maxLength={500}
+                autoComplete="street-address"
+              />
+              <button
+                type="button"
+                className="cc-btn-pill cc-btn-pill--ghost cc-location-row__geo"
+                onClick={fillLocationFromDevice}
+                disabled={geoLoading || submitting}
+              >
+                {geoLoading ? 'Locating…' : 'Use my location'}
+              </button>
+            </div>
+            <p className="cc-form-hint">
+              Uses your browser location (you will be asked for permission). Address text comes from OpenStreetMap
+              (Nominatim).
+            </p>
+          </div>
 
           <div className="cc-upload">
             <span className="cc-form-field__label">Photographs</span>
@@ -313,8 +391,19 @@ export function NewReportModal({ open, onClose, sessionToken, onSuccess }: NewRe
             <button type="button" className="cc-btn-pill cc-btn-pill--ghost" onClick={onClose} disabled={submitting}>
               Cancel
             </button>
-            <button type="submit" className="cc-btn-pill cc-btn-pill--primary" disabled={submitting}>
-              {submitting ? 'Submitting…' : 'Submit report'}
+            <button
+              type="submit"
+              className={`cc-btn-pill cc-btn-pill--primary${submitting ? ' cc-btn--busy' : ''}`}
+              disabled={submitting}
+            >
+              {submitting ? (
+                <>
+                  <span className="cc-spinner" aria-hidden />
+                  Submitting…
+                </>
+              ) : (
+                'Submit report'
+              )}
             </button>
           </div>
         </form>

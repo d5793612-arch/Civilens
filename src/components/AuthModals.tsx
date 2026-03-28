@@ -98,8 +98,19 @@ export function SignInModal({ open, onClose, onSignedIn, onOpenSignUp }: SignInM
             <button type="button" className="cc-btn-pill cc-btn-pill--ghost" onClick={onClose} disabled={busy}>
               Cancel
             </button>
-            <button type="submit" className="cc-btn-pill cc-btn-pill--primary" disabled={busy}>
-              {busy ? 'Signing in…' : 'Sign in'}
+            <button
+              type="submit"
+              className={`cc-btn-pill cc-btn-pill--primary${busy ? ' cc-btn--busy' : ''}`}
+              disabled={busy}
+            >
+              {busy ? (
+                <>
+                  <span className="cc-spinner" aria-hidden />
+                  Signing in…
+                </>
+              ) : (
+                'Sign in'
+              )}
             </button>
           </div>
           <p className="cc-auth-switch">
@@ -249,8 +260,19 @@ export function SignUpModal({ open, onClose, onRegistered, onOpenSignIn }: SignU
             <button type="button" className="cc-btn-pill cc-btn-pill--ghost" onClick={onClose} disabled={busy}>
               Cancel
             </button>
-            <button type="submit" className="cc-btn-pill cc-btn-pill--primary" disabled={busy}>
-              {busy ? 'Creating…' : 'Create account'}
+            <button
+              type="submit"
+              className={`cc-btn-pill cc-btn-pill--primary${busy ? ' cc-btn--busy' : ''}`}
+              disabled={busy}
+            >
+              {busy ? (
+                <>
+                  <span className="cc-spinner" aria-hidden />
+                  Creating…
+                </>
+              ) : (
+                'Create account'
+              )}
             </button>
           </div>
           <p className="cc-auth-switch">

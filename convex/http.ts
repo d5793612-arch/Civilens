@@ -1,6 +1,39 @@
 import { httpRouter } from 'convex/server'
 import { httpAction } from './_generated/server'
-import { internal } from './_generated/api'
+import { api, internal } from './_generated/api'
+import type { Id } from './_generated/dataModel'
+
+const officerApiHeaders: Record<string, string> = {
+  'Content-Type': 'application/json',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, PATCH, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+}
+
+function bearer(request: Request): string | null {
+  const a = request.headers.get('Authorization')
+  if (!a?.toLowerCase().startsWith('bearer ')) return null
+  const t = a.slice(7).trim()
+  return t || null
+}
+
+function officerJson(data: unknown, status = 200) {
+  return new Response(JSON.stringify(data), { status, headers: officerApiHeaders })
+}
+
+function parseComplaintSubpath(url: string): { complaintId: string; proof: boolean } | { error: string } {
+  const pathname = new URL(url).pathname
+  const base = '/api/complaints'
+  if (!pathname.startsWith(base)) return { error: 'bad_prefix' }
+  let rest = pathname.slice(base.length)
+  if (rest.startsWith('/')) rest = rest.slice(1)
+  rest = rest.replace(/\/$/, '')
+  if (!rest) return { error: 'empty' }
+  const parts = rest.split('/').filter(Boolean)
+  if (parts.length === 1) return { complaintId: parts[0], proof: false }
+  if (parts.length === 2 && parts[1] === 'proof') return { complaintId: parts[0], proof: true }
+  return { error: 'invalid_path' }
+}
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
@@ -76,6 +109,130 @@ http.route({
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )
+  }),
+})
+
+http.route({
+  path: '/api/complaints',
+  method: 'OPTIONS',
+  handler: httpAction(async () => new Response(null, { status: 204, headers: officerApiHeaders })),
+})
+
+http.route({
+  path: '/api/complaints',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const token = bearer(request)
+    if (!token) return officerJson({ error: 'Missing Authorization: Bearer <officer_token>' }, 401)
+    const rows = await ctx.runQuery(api.officerComplaints.listAll, { officerToken: token })
+    if (rows === null) return officerJson({ error: 'Invalid or expired officer session' }, 401)
+    return officerJson(rows)
+  }),
+})
+
+http.route({
+  pathPrefix: '/api/complaints/',
+  method: 'OPTIONS',
+  handler: httpAction(async () => new Response(null, { status: 204, headers: officerApiHeaders })),
+})
+
+http.route({
+  pathPrefix: '/api/complaints/',
+  method: 'GET',
+  handler: httpAction(async (ctx, request) => {
+    const token = bearer(request)
+    if (!token) return officerJson({ error: 'Missing Authorization: Bearer <officer_token>' }, 401)
+    const parsed = parseComplaintSubpath(request.url)
+    if ('error' in parsed) {
+      if (parsed.error === 'invalid_path') {
+        return officerJson({ error: 'Expected /api/complaints/:id or /api/complaints/:id/proof' }, 400)
+      }
+      return officerJson({ error: 'GET single complaint: /api/complaints/:complaintId' }, 400)
+    }
+    if (parsed.proof) {
+      return officerJson({ error: 'GET single complaint: /api/complaints/:complaintId' }, 400)
+    }
+    const valid = await ctx.runQuery(internal.officerAuth.isOfficerTokenValid, { token })
+    if (!valid) return officerJson({ error: 'Invalid or expired officer session' }, 401)
+    const row = await ctx.runQuery(api.officerComplaints.getByComplaintId, {
+      officerToken: token,
+      complaintId: parsed.complaintId,
+    })
+    if (!row) return officerJson({ error: 'Complaint not found' }, 404)
+    return officerJson(row)
+  }),
+})
+
+http.route({
+  pathPrefix: '/api/complaints/',
+  method: 'PATCH',
+  handler: httpAction(async (ctx, request) => {
+    const token = bearer(request)
+    if (!token) return officerJson({ error: 'Missing Authorization: Bearer <officer_token>' }, 401)
+    const parsed = parseComplaintSubpath(request.url)
+    if (!('complaintId' in parsed) || parsed.proof) {
+      return officerJson({ error: 'PATCH /api/complaints/:complaintId with JSON body { status, remark? }' }, 400)
+    }
+    let body: { status?: string; remark?: string }
+    try {
+      body = (await request.json()) as { status?: string; remark?: string }
+    } catch {
+      return officerJson({ error: 'Invalid JSON body' }, 400)
+    }
+    if (!body.status?.trim()) return officerJson({ error: 'Body must include status: submitted | in_progress | resolved' }, 400)
+    try {
+      const result = await ctx.runMutation(api.officerComplaints.updateComplaintStatus, {
+        officerToken: token,
+        complaintId: parsed.complaintId,
+        status: body.status.trim(),
+        remark: body.remark?.trim() || undefined,
+      })
+      return officerJson(result)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Update failed'
+      const low = msg.toLowerCase()
+      if (low.includes('invalid') || low.includes('session') || low.includes('expired')) {
+        return officerJson({ error: msg }, low.includes('session') || low.includes('expired') ? 401 : 400)
+      }
+      if (low.includes('not found')) return officerJson({ error: msg }, 404)
+      return officerJson({ error: msg }, 400)
+    }
+  }),
+})
+
+http.route({
+  pathPrefix: '/api/complaints/',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const token = bearer(request)
+    if (!token) return officerJson({ error: 'Missing Authorization: Bearer <officer_token>' }, 401)
+    const parsed = parseComplaintSubpath(request.url)
+    if (!('complaintId' in parsed) || !parsed.proof) {
+      return officerJson({ error: 'POST resolution proof: /api/complaints/:complaintId/proof with JSON { storageId }' }, 400)
+    }
+    let body: { storageId?: string }
+    try {
+      body = (await request.json()) as { storageId?: string }
+    } catch {
+      return officerJson({ error: 'Invalid JSON body' }, 400)
+    }
+    if (!body.storageId?.trim()) return officerJson({ error: 'Body must include storageId from Convex upload URL' }, 400)
+    try {
+      await ctx.runMutation(api.officerComplaints.addResolutionProof, {
+        officerToken: token,
+        complaintId: parsed.complaintId,
+        storageId: body.storageId.trim() as Id<'_storage'>,
+      })
+      return officerJson({ ok: true })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Upload failed'
+      const low = msg.toLowerCase()
+      if (low.includes('session') || low.includes('expired') || low.includes('invalid')) {
+        return officerJson({ error: msg }, 401)
+      }
+      if (low.includes('not found')) return officerJson({ error: msg }, 404)
+      return officerJson({ error: msg }, 400)
+    }
   }),
 })
 

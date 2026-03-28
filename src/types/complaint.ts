@@ -7,4 +7,13 @@ export interface Complaint {
   department: string
   status: Status
   severity: Severity
+  escalationLevel: number
+  duplicateOfComplaintId?: string
+  createdAt?: number
+  description?: string
+  location?: string
+  issueCategory?: string | null
+  hasResolutionProof?: boolean
+  lat?: number | null
+  lng?: number | null
 }

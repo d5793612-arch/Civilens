@@ -12,7 +12,7 @@ import {
   runVisionGemini,
   type VisionJson,
 } from './geminiAi'
-import { normalizeSeverity, routeFromCategory } from './routing'
+import { categoryToIssueCategory, normalizeSeverity, routeFromCategory } from './routing'
 
 type PipelineCtx = Pick<GenericActionCtx<DataModel>, 'runMutation' | 'runQuery'>
 
@@ -56,6 +56,10 @@ async function buildAndStore(params: {
   ctx: PipelineCtx
   userId?: Id<'users'>
   location: string
+  lat?: number
+  lng?: number
+  duplicateOfComplaintId?: string
+  duplicateSimilarityScore?: number
   manual: {
     issueType: string
     description: string
@@ -66,7 +70,12 @@ async function buildAndStore(params: {
   imageMime?: string
   storageIds?: Id<'_storage'>[]
   source: string
-}): Promise<{ complaint_id: string; status: string; department: string }> {
+}): Promise<{
+  complaint_id: string
+  status: string
+  department: string
+  duplicateOfComplaintId?: string
+}> {
   const geminiKey = getGeminiApiKey()
   const mime = params.imageMime?.trim() || 'image/jpeg'
   let vision: VisionJson | null = null
@@ -132,18 +141,37 @@ async function buildAndStore(params: {
     severity: severityNorm,
     description: params.manual.description || undefined,
     location: params.location || undefined,
+    lat: params.lat,
+    lng: params.lng,
     imageStorageIds: params.storageIds?.length ? params.storageIds : undefined,
     visionJson: vision ? { ...structured, vision } : structured,
     complaintTextEn: en,
     complaintTextHi: hi,
     category: routed.category,
+    issueCategory: categoryToIssueCategory(routed.category),
     source: params.source,
+    duplicateOfComplaintId: params.duplicateOfComplaintId,
+    duplicateSimilarityScore: params.duplicateSimilarityScore,
   })
+
+  if (params.userId) {
+    let body = `Your grievance ${complaintId} was filed and routed to ${routed.department}.`
+    if (params.duplicateOfComplaintId) {
+      body += ` Possible duplicate of earlier report ${params.duplicateOfComplaintId} (similar text or nearby location).`
+    }
+    await params.ctx.runMutation(internal.notifications.createForUser, {
+      userId: params.userId,
+      title: `Report filed: ${complaintId}`,
+      body,
+      kind: params.duplicateOfComplaintId ? 'submitted_duplicate' : 'submitted',
+    })
+  }
 
   return {
     complaint_id: complaintId,
     status: 'filed',
     department: routed.department,
+    duplicateOfComplaintId: params.duplicateOfComplaintId,
   }
 }
 
@@ -155,6 +183,8 @@ export const submitReport = action({
     department: v.string(),
     severity: v.string(),
     location: v.string(),
+    lat: v.optional(v.number()),
+    lng: v.optional(v.number()),
     storageIds: v.optional(v.array(v.id('_storage'))),
   },
   handler: async (ctx, args) => {
@@ -162,6 +192,22 @@ export const submitReport = action({
     if (args.sessionToken) {
       const uid = await ctx.runQuery(internal.auth.userIdForToken, { token: args.sessionToken })
       if (uid) userId = uid
+    }
+
+    let duplicateOfComplaintId: string | undefined
+    let duplicateSimilarityScore: number | undefined
+    if (userId) {
+      const dup = await ctx.runQuery(internal.duplicateDetection.findDuplicateMatch, {
+        userId,
+        issueType: args.issueType,
+        description: args.description,
+        lat: args.lat,
+        lng: args.lng,
+      })
+      if (dup) {
+        duplicateOfComplaintId = dup.complaintId
+        duplicateSimilarityScore = dup.score
+      }
     }
 
     let imageBase64: string | undefined
@@ -175,6 +221,10 @@ export const submitReport = action({
       ctx,
       userId,
       location: args.location,
+      lat: args.lat,
+      lng: args.lng,
+      duplicateOfComplaintId,
+      duplicateSimilarityScore,
       manual: {
         issueType: args.issueType,
         description: args.description,
@@ -186,7 +236,12 @@ export const submitReport = action({
       source: 'web_form',
     })
 
-    return { id: result.complaint_id, ...result }
+    return {
+      id: result.complaint_id,
+      status: result.status,
+      department: result.department,
+      duplicateOfComplaintId: result.duplicateOfComplaintId,
+    }
   },
 })
 
@@ -218,7 +273,6 @@ export const processWhatsAppImage = internalAction({
   },
 })
 
-/** Public action for testing the WhatsApp-style image pipeline from tools or admin UI. */
 export const simulateWhatsAppWebhook = action({
   args: {
     imageBase64: v.string(),

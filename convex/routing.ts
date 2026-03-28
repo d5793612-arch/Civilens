@@ -41,6 +41,14 @@ export function routeFromCategory(raw: string): RouteResult {
   }
 }
 
+/** Stored on complaints for officer filters (API: garbage | pothole | water_leak | other). */
+export function categoryToIssueCategory(cat: RoutedCategory): 'garbage' | 'pothole' | 'water_leak' | 'other' {
+  if (cat === 'water') return 'water_leak'
+  if (cat === 'pothole') return 'pothole'
+  if (cat === 'garbage') return 'garbage'
+  return 'other'
+}
+
 export function normalizeSeverity(s: string): 'Low' | 'Medium' | 'High' | 'Critical' {
   const x = s.toLowerCase()
   if (x.includes('critical')) return 'Critical'

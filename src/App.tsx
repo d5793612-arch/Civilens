@@ -1,9 +1,13 @@
 import { useMutation, useQuery } from 'convex/react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '@convex/_generated/api'
 import { initialsFromName, loadSession, saveSession, type SessionUser } from './auth/session'
 import { SignInModal, SignUpModal } from './components/AuthModals'
+import { IndiaFieldMap } from './components/IndiaFieldMap'
 import { NewReportModal } from './components/NewReportModal'
+import { ReportSearch } from './components/ReportSearch'
+import { NotificationsDropdown } from './components/NotificationsDropdown'
 import type { Complaint, Status, Severity } from './types/complaint'
 import './App.css'
 
@@ -24,6 +28,13 @@ const DEPT_BAR_COLORS: Record<string, string> = {
   Sanitation: '#6b9e7d',
   'Urban Planning': '#b8bcc4',
   'Roads & Transport': '#2d5a87',
+}
+
+const SEVERITY_BAR_COLORS: Record<Severity, string> = {
+  Low: '#6b7280',
+  Medium: '#ca8a04',
+  High: '#ea580c',
+  Critical: '#b42318',
 }
 
 const TEAMS = [
@@ -75,6 +86,15 @@ function toUiComplaint(row: {
   department?: string
   status?: string
   severity?: string
+  escalationLevel?: number
+  duplicateOfComplaintId?: string
+  createdAt?: number
+  description?: string
+  location?: string
+  issueCategory?: string | null
+  hasResolutionProof?: boolean
+  lat?: number | null
+  lng?: number | null
 }): Complaint {
   const statusSet: Record<string, Status> = {
     Pending: 'Pending',
@@ -93,6 +113,15 @@ function toUiComplaint(row: {
     department: String(row.department ?? '—'),
     status: statusSet[row.status ?? ''] ?? 'Pending',
     severity: sevSet[row.severity ?? ''] ?? 'Medium',
+    escalationLevel: row.escalationLevel ?? 0,
+    duplicateOfComplaintId: row.duplicateOfComplaintId,
+    createdAt: row.createdAt,
+    description: row.description,
+    location: row.location,
+    issueCategory: row.issueCategory ?? undefined,
+    hasResolutionProof: row.hasResolutionProof,
+    lat: row.lat ?? undefined,
+    lng: row.lng ?? undefined,
   }
 }
 
@@ -104,11 +133,18 @@ function App() {
   const [deptFilter, setDeptFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
   const [navActive, setNavActive] = useState<NavKey>('dashboard')
-  const scrollRootRef = useRef<HTMLDivElement>(null)
+  const [escalatingId, setEscalatingId] = useState<string | null>(null)
+  const [escalateMessage, setEscalateMessage] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
 
   const rows = useQuery(api.complaints.list, session ? { sessionToken: session.token } : 'skip')
+  const analytics = useQuery(
+    api.complaints.analyticsSummary,
+    session ? { sessionToken: session.token } : 'skip',
+  )
   const me = useQuery(api.auth.me, session ? { sessionToken: session.token } : 'skip')
   const logoutMutation = useMutation(api.auth.logout)
+  const escalateComplaint = useMutation(api.complaints.escalateComplaint)
 
   useEffect(() => {
     setSession(loadSession())
@@ -148,12 +184,27 @@ function App() {
   const displayName = session?.name ?? 'there'
 
   const filtered = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
     return complaints.filter((c) => {
       if (deptFilter !== 'all' && c.department !== deptFilter) return false
       if (statusFilter !== 'all' && c.status !== statusFilter) return false
-      return true
+      if (!q) return true
+      const hay = [
+        c.id,
+        c.issueType,
+        c.department,
+        c.description,
+        c.location,
+        c.status,
+        c.severity,
+        c.issueCategory,
+        c.duplicateOfComplaintId,
+      ]
+        .filter(Boolean)
+        .map((x) => String(x).toLowerCase())
+      return hay.some((chunk) => chunk.includes(q))
     })
-  }, [complaints, deptFilter, statusFilter])
+  }, [complaints, deptFilter, statusFilter, searchQuery])
 
   const sortedRows = useMemo(
     () =>
@@ -185,15 +236,35 @@ function App() {
 
   const maxDept = Math.max(1, ...departmentLoad.map((d) => d.count))
 
+  const maxLast7Count = useMemo(() => {
+    const days = analytics?.last7Days
+    if (!days?.length) return 1
+    return Math.max(1, ...days.map((d) => d.count))
+  }, [analytics])
+
+  const handleEscalate = useCallback(
+    async (complaintId: string) => {
+      if (!session?.token) return
+      setEscalateMessage(null)
+      setEscalatingId(complaintId)
+      try {
+        await escalateComplaint({ sessionToken: session.token, complaintId })
+        setEscalateMessage(`Report ${complaintId} escalated. Check notifications for confirmation.`)
+      } catch (err) {
+        setEscalateMessage(err instanceof Error ? err.message : 'Could not escalate this report.')
+      } finally {
+        setEscalatingId(null)
+      }
+    },
+    [escalateComplaint, session?.token],
+  )
+
   const scrollToSection = useCallback((key: NavKey, targetId: string) => {
     setNavActive(key)
-    const root = scrollRootRef.current
     const el = document.getElementById(targetId)
-    if (!el || !root) return
-    const top = root.getBoundingClientRect().top
-    const t = el.getBoundingClientRect().top
-    const y = root.scrollTop + (t - top) - 8
-    root.scrollTo({ top: Math.max(0, y), behavior: 'smooth' })
+    if (!el) return
+    // Main content scrolls on the window, not `.cc-scroll` (that div is not overflow-scroll).
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }, [])
 
   return (
@@ -253,6 +324,9 @@ function App() {
             </span>
             Settings
           </button>
+          <Link to="/dashboard" className="cc-nav__link cc-nav__link--officer">
+            Officer portal
+          </Link>
           <div className="cc-sidebar__auth" role="group" aria-label="Account">
             {session ? (
               <button
@@ -314,22 +388,24 @@ function App() {
 
       <div className="cc-main">
         <header className="cc-topbar">
-          <label className="cc-search">
-            <span className="visually-hidden">Search</span>
-            <span className="cc-search__icon" aria-hidden>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="7" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
-            </span>
-            <input type="search" className="cc-search__input" placeholder="Search reports, IDs, streets…" />
-          </label>
+          <ReportSearch
+            departments={DEPARTMENTS}
+            complaints={complaints}
+            signedIn={!!session}
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            onJumpToGrievances={() => scrollToSection('grievances', 'civilens-grievances')}
+          />
           <div className="cc-topbar__actions">
-            <button type="button" className="cc-icon-btn" aria-label="Notifications">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
-              </svg>
-            </button>
+            {session ? (
+              <NotificationsDropdown sessionToken={session.token} />
+            ) : (
+              <button type="button" className="cc-icon-btn" aria-label="Notifications" disabled>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
+                </svg>
+              </button>
+            )}
             <button type="button" className="cc-icon-btn" aria-label="Help">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
                 <circle cx="12" cy="12" r="10" />
@@ -371,10 +447,10 @@ function App() {
           </div>
         </header>
 
-        <div className="cc-scroll" ref={scrollRootRef}>
+        <div className="cc-scroll">
           <section
             id="civilens-dashboard"
-            className="cc-hero civilens-scroll-target"
+            className="cc-hero civilens-scroll-target cc-m-in"
             aria-labelledby="hero-heading"
           >
             <h1 id="hero-heading" className="cc-hero__title">
@@ -398,7 +474,11 @@ function App() {
             </p>
           </section>
 
-          <div id="civilens-analytics" className="civilens-scroll-target" aria-label="Analytics">
+          <div
+            id="civilens-analytics"
+            className="civilens-scroll-target cc-m-in cc-m-in--d1"
+            aria-label="Analytics"
+          >
           <section className="cc-stats" aria-label="Summary statistics">
             <article className="cc-stat">
               <span className="cc-stat__icon cc-stat__icon--neutral" aria-hidden>
@@ -431,6 +511,106 @@ function App() {
               <p className="cc-stat__value">{stats.pending}</p>
             </article>
           </section>
+
+          {session && (
+            <section
+              className="cc-card cc-card--lift cc-analytics-board"
+              aria-labelledby="analytics-dash-heading"
+            >
+              <p className="cc-slug cc-slug--on-card">Insights</p>
+              <h2 id="analytics-dash-heading" className="cc-card__title">
+                Analytics dashboard
+              </h2>
+              <p className="cc-card__hint">
+                Duplicate detection, escalations, and filing trends for your account
+              </p>
+              {analytics === undefined ? (
+                <>
+                  <div className="cc-analytics-skeleton" aria-busy="true" aria-label="Loading analytics">
+                    <div className="cc-analytics-skeleton__kpis">
+                      {[0, 1, 2].map((k) => (
+                        <div key={k} className="cc-analytics-skeleton__kpi cc-skeleton-block" />
+                      ))}
+                    </div>
+                    <div className="cc-analytics-skeleton__bars">
+                      {[0, 1, 2, 3].map((k) => (
+                        <div key={k} className="cc-analytics-skeleton__bar cc-skeleton-block" />
+                      ))}
+                    </div>
+                  </div>
+                  <p className="cc-empty cc-empty--inline cc-loading-caption">
+                    <span className="cc-spinner" aria-hidden />
+                    Loading analytics…
+                  </p>
+                </>
+              ) : !analytics ? (
+                <p className="cc-empty cc-empty--inline">Analytics unavailable.</p>
+              ) : (
+                <div className="cc-analytics-grid cc-content-fade">
+                  <div className="cc-analytics-kpis">
+                    <article className="cc-analytics-kpi">
+                      <span className="cc-analytics-kpi__label">In progress</span>
+                      <span className="cc-analytics-kpi__value">{analytics.inProgress}</span>
+                    </article>
+                    <article className="cc-analytics-kpi">
+                      <span className="cc-analytics-kpi__label">Possible duplicates</span>
+                      <span className="cc-analytics-kpi__value">{analytics.duplicatesFlagged}</span>
+                    </article>
+                    <article className="cc-analytics-kpi">
+                      <span className="cc-analytics-kpi__label">Escalated reports</span>
+                      <span className="cc-analytics-kpi__value">{analytics.escalated}</span>
+                    </article>
+                  </div>
+                  <div className="cc-analytics-block">
+                    <h3 className="cc-analytics-block__title">By severity</h3>
+                    <ul className="cc-bars cc-bars--compact" role="list">
+                      {(['Low', 'Medium', 'High', 'Critical'] as const).map((sev) => {
+                        const count = analytics.bySeverity[sev] ?? 0
+                        return (
+                          <li key={sev} className="cc-bars__row">
+                            <span className="cc-bars__label">{sev}</span>
+                            <div className="cc-bars__track" aria-hidden>
+                              <div
+                                className="cc-bars__fill"
+                                style={{
+                                  width: `${analytics.total ? (count / analytics.total) * 100 : 0}%`,
+                                  background: SEVERITY_BAR_COLORS[sev],
+                                }}
+                              />
+                            </div>
+                            <span className="cc-bars__count">{count}</span>
+                          </li>
+                        )
+                      })}
+                    </ul>
+                  </div>
+                  <div className="cc-analytics-block">
+                    <h3 className="cc-analytics-block__title">Reports filed (last 7 days)</h3>
+                    <ul className="cc-trend-bars" role="list">
+                      {analytics.last7Days.map(({ day, count }) => (
+                        <li key={day} className="cc-trend-bars__row">
+                          <span className="cc-trend-bars__label">
+                            {new Date(`${day}T12:00:00`).toLocaleDateString(undefined, {
+                              weekday: 'short',
+                              month: 'short',
+                              day: 'numeric',
+                            })}
+                          </span>
+                          <div className="cc-trend-bars__track" aria-hidden>
+                            <div
+                              className="cc-trend-bars__fill"
+                              style={{ width: `${(count / maxLast7Count) * 100}%` }}
+                            />
+                          </div>
+                          <span className="cc-trend-bars__count">{count}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </section>
+          )}
 
           <div className="cc-split">
             <section className="cc-card cc-card--lift" aria-labelledby="dept-heading">
@@ -466,7 +646,9 @@ function App() {
                   <p className="cc-card__hint">
                     {!session
                       ? 'Sign in to load your reports.'
-                      : `${sortedRows.length} of ${complaints.length} in view`}
+                      : searchQuery.trim()
+                        ? `${sortedRows.length} of ${complaints.length} match filters and search “${searchQuery.trim()}”.`
+                        : `${sortedRows.length} of ${complaints.length} in view`}
                   </p>
                 </div>
                 {session && complaints.length > 0 && (
@@ -503,10 +685,37 @@ function App() {
                 )}
               </div>
 
+              {escalateMessage && (
+                <p
+                  className={
+                    escalateMessage.startsWith('Report ')
+                      ? 'cc-banner cc-banner--success'
+                      : 'cc-banner cc-banner--error'
+                  }
+                  role="status"
+                >
+                  {escalateMessage}
+                </p>
+              )}
+
               {!session ? (
                 <p className="cc-empty">Sign in to see grievances you have filed.</p>
               ) : rows === undefined ? (
-                <p className="cc-empty">Loading your grievances…</p>
+                <>
+                  <div className="cc-table-skeleton" aria-busy="true" aria-label="Loading grievances">
+                    {Array.from({ length: 6 }, (_, sk) => (
+                      <div key={sk} className="cc-table-skeleton__row">
+                        {[0, 1, 2, 3].map((c) => (
+                          <div key={c} className="cc-table-skeleton__cell cc-skeleton-block" />
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="cc-empty cc-loading-caption">
+                    <span className="cc-spinner" aria-hidden />
+                    Loading your grievances…
+                  </p>
+                </>
               ) : complaints.length === 0 ? (
                 <p className="cc-empty">You have not filed any grievances yet.</p>
               ) : (
@@ -520,13 +729,16 @@ function App() {
                           <th scope="col">Department</th>
                           <th scope="col">Status</th>
                           <th scope="col">Severity</th>
+                          <th scope="col">Flags</th>
+                          <th scope="col">Escalation</th>
                         </tr>
                       </thead>
                       <tbody>
                         {sortedRows.map((row, i) => (
                           <tr
                             key={row.id}
-                            className={i % 2 === 1 ? 'cc-table__stripe' : undefined}
+                            className={`cc-table-row-in${i % 2 === 1 ? ' cc-table__stripe' : ''}`}
+                            style={{ animationDelay: `${Math.min(i, 16) * 0.032}s` }}
                           >
                             <td>
                               <span className="cc-mono">{row.id}</span>
@@ -538,6 +750,54 @@ function App() {
                             </td>
                             <td>
                               <SeverityCell severity={row.severity} />
+                            </td>
+                            <td>
+                              <div className="cc-flag-cell">
+                                {row.duplicateOfComplaintId ? (
+                                  <span
+                                    className="civic-chip civic-chip--dup"
+                                    title={`Similar to ${row.duplicateOfComplaintId}`}
+                                  >
+                                    Dup · {row.duplicateOfComplaintId}
+                                  </span>
+                                ) : (
+                                  <span className="cc-flag-cell__dash">—</span>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              <div className="cc-esc-cell">
+                                {row.escalationLevel >= 1 && (
+                                  <span
+                                    className={
+                                      row.escalationLevel >= 2
+                                        ? 'civic-chip civic-chip--esc-max'
+                                        : 'civic-chip civic-chip--esc'
+                                    }
+                                    title={
+                                      row.escalationLevel >= 2
+                                        ? 'Maximum escalation tier'
+                                        : 'Escalated once — you can escalate again'
+                                    }
+                                  >
+                                    Tier {row.escalationLevel}
+                                  </span>
+                                )}
+                                {row.escalationLevel < 2 && (
+                                  <button
+                                    type="button"
+                                    className="cc-btn-pill cc-btn-pill--ghost cc-btn-pill--sm"
+                                    disabled={escalatingId === row.id}
+                                    onClick={() => void handleEscalate(row.id)}
+                                  >
+                                    {escalatingId === row.id
+                                      ? 'Working…'
+                                      : row.escalationLevel === 0
+                                        ? 'Escalate'
+                                        : 'Escalate again'}
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -553,33 +813,21 @@ function App() {
           </div>
           </div>
 
-          <section id="civilens-settings" className="cc-bottom civilens-scroll-target" aria-labelledby="settings-heading">
+          <section
+            id="civilens-settings"
+            className="cc-bottom civilens-scroll-target cc-m-in cc-m-in--d2"
+            aria-labelledby="settings-heading"
+          >
             <div className="cc-card cc-card--lift cc-map-card">
               <p className="cc-slug cc-slug--on-card">Field view</p>
               <h2 id="settings-heading" className="cc-card__title">
                 Geospatial distribution
               </h2>
-              <p className="cc-card__hint">Open cases clustered near the riverfront utility corridor</p>
-              <div className="cc-map" role="img" aria-label="Stylized city map with one highlighted location">
-                <svg className="cc-map__svg" viewBox="0 0 400 220" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <rect width="400" height="220" rx="16" fill="var(--surface-container-high)" />
-                  <path
-                    opacity="0.35"
-                    d="M40 180 L80 60 L140 100 L200 40 L260 90 L320 50 L360 120 L360 180 Z"
-                    fill="var(--on-surface)"
-                  />
-                  <path
-                    opacity="0.2"
-                    d="M20 140 L100 160 L160 120 L240 150 L300 110 L380 130 L380 200 L20 200 Z"
-                    fill="var(--primary)"
-                  />
-                  <g className="cc-map__pin">
-                    <circle cx="210" cy="95" r="28" fill="var(--primary)" opacity="0.12" />
-                    <circle cx="210" cy="95" r="8" fill="var(--primary)" />
-                    <circle cx="210" cy="95" r="3" fill="var(--on-primary)" />
-                  </g>
-                </svg>
-              </div>
+              <p className="cc-card__hint">
+                Live map of India (OpenStreetMap). Open grievances you filed with GPS appear as pins and update in real
+                time as Convex syncs.
+              </p>
+              <IndiaFieldMap complaints={complaints} signedIn={!!session} />
             </div>
 
             <div className="cc-card cc-card--lift cc-teams">
