@@ -101,10 +101,16 @@ npx convex dev
 
 #### Backend (Convex Dashboard → Environment Variables)
 
-| Variable         | Required | Purpose                       |
-| ---------------- | -------- | ----------------------------- |
-| `GEMINI_API_KEY` | ✅        | AI image + text processing    |
-| `EXA_API_KEY`    | ❌        | Additional context enrichment |
+| Variable           | Required | Purpose                                                |
+| ------------------ | -------- | ------------------------------------------------------ |
+| `GEMINI_API_KEY`   | ✅        | AI image + text processing                             |
+| `RESEND_API_KEY`   | ✅ *     | Forgot-password emails ([resend.com](https://resend.com)) |
+| `RESEND_FROM`      | ❌        | Sender (default: Resend onboarding)                  |
+| `EXA_API_KEY`      | ❌        | Additional context enrichment                          |
+
+\* Required for **Forgot password** (reset links by email). Without it, that flow returns an error when sending mail.
+
+Convex backend secrets are **not** read from `.env.local` (Vite only). Set them in the [Convex dashboard](https://dashboard.convex.dev) for the same deployment as `VITE_CONVEX_URL`, or use `npx convex env set …` from this project.
 
 ---
 

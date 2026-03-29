@@ -14,6 +14,16 @@ export default defineSchema({
     expiresAt: v.number(),
   }).index('by_token', ['token']),
 
+  /** One-time links for forgot-password email (cleared after use). */
+  passwordResetTokens: defineTable({
+    email: v.string(),
+    token: v.string(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+  })
+    .index('by_token', ['token'])
+    .index('by_email', ['email']),
+
   complaints: defineTable({
     complaintId: v.string(),
     userId: v.optional(v.id('users')),

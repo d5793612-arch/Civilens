@@ -8,9 +8,10 @@ export interface SignInModalProps {
   onClose: () => void
   onSignedIn: (user: SessionUser) => void
   onOpenSignUp: () => void
+  onOpenForgotPassword: () => void
 }
 
-export function SignInModal({ open, onClose, onSignedIn, onOpenSignUp }: SignInModalProps) {
+export function SignInModal({ open, onClose, onSignedIn, onOpenSignUp, onOpenForgotPassword }: SignInModalProps) {
   const titleId = useId()
   const login = useAction(api.authActions.login)
   const [email, setEmail] = useState('')
@@ -93,6 +94,11 @@ export function SignInModal({ open, onClose, onSignedIn, onOpenSignUp }: SignInM
               required
             />
           </label>
+          <p className="cc-auth-forgot">
+            <button type="button" className="cc-auth-switch__link" onClick={onOpenForgotPassword}>
+              Forgot password?
+            </button>
+          </p>
           {error && <p className="cc-modal__error">{error}</p>}
           <div className="cc-modal__actions">
             <button type="button" className="cc-btn-pill cc-btn-pill--ghost" onClick={onClose} disabled={busy}>

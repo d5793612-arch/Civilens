@@ -1,13 +1,16 @@
 import { useMutation, useQuery } from 'convex/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '@convex/_generated/api'
 import { initialsFromName, loadSession, saveSession, type SessionUser } from './auth/session'
 import { SignInModal, SignUpModal } from './components/AuthModals'
+import { ForgotPasswordModal } from './components/ForgotPasswordModal'
+import { ResetPasswordModal } from './components/ResetPasswordModal'
 import { IndiaFieldMap } from './components/IndiaFieldMap'
 import { NewReportModal } from './components/NewReportModal'
 import { ReportSearch } from './components/ReportSearch'
 import { NotificationsDropdown } from './components/NotificationsDropdown'
+import { ThemeToggle } from './components/ThemeToggle'
 import type { Complaint, Status, Severity } from './types/complaint'
 import './App.css'
 
@@ -126,9 +129,13 @@ function toUiComplaint(row: {
 }
 
 function App() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [session, setSession] = useState<SessionUser | null>(null)
   const [signInOpen, setSignInOpen] = useState(false)
   const [signUpOpen, setSignUpOpen] = useState(false)
+  const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false)
+  const [resetPasswordOpen, setResetPasswordOpen] = useState(false)
+  const [resetToken, setResetToken] = useState('')
   const [reportModalOpen, setReportModalOpen] = useState(false)
   const [deptFilter, setDeptFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<string>('all')
@@ -136,6 +143,7 @@ function App() {
   const [escalatingId, setEscalatingId] = useState<string | null>(null)
   const [escalateMessage, setEscalateMessage] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   const rows = useQuery(api.complaints.list, session ? { sessionToken: session.token } : 'skip')
   const analytics = useQuery(
@@ -149,6 +157,64 @@ function App() {
   useEffect(() => {
     setSession(loadSession())
   }, [])
+
+  const clearResetQuery = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('reset')
+        return next
+      },
+      { replace: true },
+    )
+  }, [setSearchParams])
+
+  useEffect(() => {
+    const t = searchParams.get('reset')
+    if (typeof t === 'string' && t.trim().length >= 32) {
+      setResetToken(t.trim())
+      setResetPasswordOpen(true)
+    } else {
+      setResetPasswordOpen(false)
+      setResetToken('')
+    }
+  }, [searchParams])
+
+  const handlePasswordResetSuccess = useCallback(() => {
+    saveSession(null)
+    setSession(null)
+    clearResetQuery()
+    setSignInOpen(true)
+  }, [clearResetQuery])
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1025px)')
+    const closeIfDesktop = () => {
+      if (mq.matches) setMobileNavOpen(false)
+    }
+    closeIfDesktop()
+    mq.addEventListener('change', closeIfDesktop)
+    return () => mq.removeEventListener('change', closeIfDesktop)
+  }, [])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileNavOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [mobileNavOpen])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    if (typeof window.matchMedia === 'function' && !window.matchMedia('(max-width: 1024px)').matches) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prev
+    }
+  }, [mobileNavOpen])
 
   useEffect(() => {
     if (!session) return
@@ -165,6 +231,7 @@ function App() {
   }, [])
 
   const doLogout = useCallback(async () => {
+    setMobileNavOpen(false)
     if (session?.token) {
       try {
         await logoutMutation({ sessionToken: session.token })
@@ -261,6 +328,7 @@ function App() {
 
   const scrollToSection = useCallback((key: NavKey, targetId: string) => {
     setNavActive(key)
+    setMobileNavOpen(false)
     const el = document.getElementById(targetId)
     if (!el) return
     // Main content scrolls on the window, not `.cc-scroll` (that div is not overflow-scroll).
@@ -269,7 +337,18 @@ function App() {
 
   return (
     <div className="cc-shell">
-      <aside className="cc-sidebar" aria-label="Primary navigation">
+      <button
+        type="button"
+        className={`cc-sidebar-backdrop${mobileNavOpen ? ' is-visible' : ''}`}
+        aria-label="Close menu"
+        tabIndex={-1}
+        onClick={() => setMobileNavOpen(false)}
+      />
+      <aside
+        className={`cc-sidebar${mobileNavOpen ? ' cc-sidebar--open' : ''}`}
+        id="cc-nav-drawer"
+        aria-label="Primary navigation"
+      >
         <div className="cc-sidebar__brand">
           <p className="cc-brand-tagline">Report · Route · Resolve</p>
           <p className="cc-wordmark cc-wordmark--civilens">CIVILENS</p>
@@ -324,7 +403,11 @@ function App() {
             </span>
             Settings
           </button>
-          <Link to="/dashboard" className="cc-nav__link cc-nav__link--officer">
+          <Link
+            to="/dashboard"
+            className="cc-nav__link cc-nav__link--officer"
+            onClick={() => setMobileNavOpen(false)}
+          >
             Officer portal
           </Link>
           <div className="cc-sidebar__auth" role="group" aria-label="Account">
@@ -375,6 +458,7 @@ function App() {
           type="button"
           className="cc-btn-pill cc-btn-pill--primary cc-sidebar__cta"
           onClick={() => {
+            setMobileNavOpen(false)
             if (!session) {
               setSignInOpen(true)
               return
@@ -388,6 +472,20 @@ function App() {
 
       <div className="cc-main">
         <header className="cc-topbar">
+          <button
+            type="button"
+            className={`cc-menu-btn${mobileNavOpen ? ' cc-menu-btn--open' : ''}`}
+            onClick={() => setMobileNavOpen((o) => !o)}
+            aria-expanded={mobileNavOpen}
+            aria-controls="cc-nav-drawer"
+            aria-label={mobileNavOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          >
+            <span className="cc-menu-btn__bars" aria-hidden>
+              <span />
+              <span />
+              <span />
+            </span>
+          </button>
           <ReportSearch
             departments={DEPARTMENTS}
             complaints={complaints}
@@ -406,12 +504,7 @@ function App() {
                 </svg>
               </button>
             )}
-            <button type="button" className="cc-icon-btn" aria-label="Help">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01" />
-              </svg>
-            </button>
+            <ThemeToggle />
             {session ? (
               <div className="cc-user cc-user--compact">
                 <span className="cc-user__avatar" aria-hidden>
@@ -874,12 +967,33 @@ function App() {
         onClose={() => setSignInOpen(false)}
         onSignedIn={(u) => commitSession(u)}
         onOpenSignUp={() => setSignUpOpen(true)}
+        onOpenForgotPassword={() => {
+          setSignInOpen(false)
+          setForgotPasswordOpen(true)
+        }}
       />
       <SignUpModal
         open={signUpOpen}
         onClose={() => setSignUpOpen(false)}
         onRegistered={(u) => commitSession(u)}
         onOpenSignIn={() => setSignInOpen(true)}
+      />
+      <ForgotPasswordModal
+        open={forgotPasswordOpen}
+        onClose={() => setForgotPasswordOpen(false)}
+        onBackToSignIn={() => {
+          setForgotPasswordOpen(false)
+          setSignInOpen(true)
+        }}
+      />
+      <ResetPasswordModal
+        open={resetPasswordOpen && resetToken.length >= 32}
+        resetToken={resetToken}
+        onClose={() => {
+          setResetPasswordOpen(false)
+          clearResetQuery()
+        }}
+        onSuccess={handlePasswordResetSuccess}
       />
     </div>
   )

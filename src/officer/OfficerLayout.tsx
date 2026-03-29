@@ -1,6 +1,7 @@
 import { useMutation } from 'convex/react'
 import { Link, Outlet, useNavigate } from 'react-router-dom'
 import { api } from '@convex/_generated/api'
+import { ThemeToggle } from '../components/ThemeToggle'
 import { OfficerLogin } from './OfficerLogin'
 import { useOfficerSession } from './OfficerSessionContext'
 import './officer.css'
@@ -36,6 +37,7 @@ export function OfficerLayout() {
           <span className="od-header__sub">Complaint management</span>
         </div>
         <nav className="od-header__nav">
+          <ThemeToggle className="od-theme-toggle" />
           <Link to="/" className="od-header__link">
             Citizen portal
           </Link>

@@ -93,3 +93,115 @@ select {
 button {
   cursor: pointer;
 }
+
+/* —— Dark mode: cool neutral surfaces, readable blues —— */
+html[data-theme='dark'] {
+  color-scheme: dark;
+
+  --primary: #8ab4f8;
+  --primary-container: #1f3a5f;
+  --primary-dim: #062e6c;
+  --on-primary: #062e6c;
+
+  --secondary: #7fcfaf;
+  --secondary-container: #1b3d30;
+  --on-secondary-container: #b8f0d8;
+  --secondary-fixed: #1e3d32;
+  --on-secondary-fixed-variant: #9ed9c4;
+
+  --tertiary: #f0c49e;
+  --tertiary-container: #4a3018;
+  --on-tertiary-container: #fcdfc4;
+  --tertiary-fixed: #3d2814;
+  --on-tertiary-fixed-variant: #e8c4a0;
+
+  --in-progress-bg: #243044;
+  --in-progress-fg: #a8c7fa;
+
+  --surface: #121316;
+  --surface-container-low: #1a1c1f;
+  --surface-container-lowest: #0e0f12;
+  --surface-container-high: #2a2c32;
+  --surface-glass: rgba(26, 28, 31, 0.78);
+
+  --on-surface: #e4e2e6;
+  --on-surface-variant: #b0b4bc;
+
+  --outline-variant: #3f424a;
+  --ghost-outline: rgba(255, 255, 255, 0.08);
+  --focus-ring: rgba(138, 180, 248, 0.45);
+
+  --shadow-ambient: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* —— Night mode: deeper blacks, warm undertone —— */
+html[data-theme='night'] {
+  color-scheme: dark;
+
+  --primary: #c9a87a;
+  --primary-container: #3d2e1a;
+  --primary-dim: #1f160c;
+  --on-primary: #1a1208;
+
+  --secondary: #8fbf9f;
+  --secondary-container: #1a2e22;
+  --on-secondary-container: #c5e8d0;
+  --secondary-fixed: #1a2820;
+  --on-secondary-fixed-variant: #9ec9ae;
+
+  --tertiary: #d4a574;
+  --tertiary-container: #3d2814;
+  --on-tertiary-container: #f2dcc4;
+  --tertiary-fixed: #322010;
+  --on-tertiary-fixed-variant: #e0b896;
+
+  --in-progress-bg: #2a2318;
+  --in-progress-fg: #d4b896;
+
+  --surface: #0a0908;
+  --surface-container-low: #141210;
+  --surface-container-lowest: #060504;
+  --surface-container-high: #221e1a;
+  --surface-glass: rgba(20, 18, 16, 0.82);
+
+  --on-surface: #ece8e3;
+  --on-surface-variant: #a8a098;
+
+  --outline-variant: #3d3830;
+  --ghost-outline: rgba(255, 248, 235, 0.06);
+  --focus-ring: rgba(201, 168, 122, 0.4);
+
+  --shadow-ambient: 0 14px 48px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body,
+  .cc-shell,
+  .cc-sidebar,
+  .cc-topbar,
+  .cc-modal,
+  .cc-modal-backdrop,
+  .cc-notify__panel,
+  .od-shell,
+  .od-header,
+  .od-main,
+  .od-login,
+  .od-login__card {
+    transition:
+      background-color 0.38s ease,
+      color 0.32s ease,
+      border-color 0.32s ease,
+      box-shadow 0.38s ease;
+  }
+}
+
+html[data-theme='dark'] .cc-modal__error,
+html[data-theme='night'] .cc-modal__error {
+  background: color-mix(in srgb, #f87171 14%, var(--surface-container-low));
+  color: #fecaca;
+}
+
+html[data-theme='dark'] .cc-card--lift:hover,
+html[data-theme='night'] .cc-card--lift:hover {
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.4);
+}

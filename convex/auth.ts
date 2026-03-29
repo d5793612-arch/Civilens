@@ -96,3 +96,79 @@ export const getUserByEmail = internalQuery({
       .first()
   },
 })
+
+export const getPasswordResetByToken = internalQuery({
+  args: { token: v.string() },
+  handler: async (ctx, { token }) => {
+    return await ctx.db
+      .query('passwordResetTokens')
+      .withIndex('by_token', (q) => q.eq('token', token))
+      .first()
+  },
+})
+
+export const getLatestPasswordResetForEmail = internalQuery({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    const e = email.toLowerCase().trim()
+    const rows = await ctx.db
+      .query('passwordResetTokens')
+      .withIndex('by_email', (q) => q.eq('email', e))
+      .collect()
+    if (!rows.length) return null
+    return rows.reduce((a, b) => (a.createdAt >= b.createdAt ? a : b))
+  },
+})
+
+export const createPasswordResetToken = internalMutation({
+  args: {
+    email: v.string(),
+    token: v.string(),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const e = args.email.toLowerCase().trim()
+    const existing = await ctx.db
+      .query('passwordResetTokens')
+      .withIndex('by_email', (q) => q.eq('email', e))
+      .collect()
+    for (const r of existing) await ctx.db.delete(r._id)
+    await ctx.db.insert('passwordResetTokens', {
+      email: e,
+      token: args.token,
+      expiresAt: args.expiresAt,
+      createdAt: args.createdAt,
+    })
+  },
+})
+
+export const deletePasswordResetsForEmail = internalMutation({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    const e = email.toLowerCase().trim()
+    const rows = await ctx.db
+      .query('passwordResetTokens')
+      .withIndex('by_email', (q) => q.eq('email', e))
+      .collect()
+    for (const r of rows) await ctx.db.delete(r._id)
+  },
+})
+
+export const setUserPasswordHash = internalMutation({
+  args: { userId: v.id('users'), passwordHash: v.string() },
+  handler: async (ctx, { userId, passwordHash }) => {
+    await ctx.db.patch(userId, { passwordHash })
+  },
+})
+
+export const deleteAllSessionsForUser = internalMutation({
+  args: { userId: v.id('users') },
+  handler: async (ctx, { userId }) => {
+    const sessions = await ctx.db
+      .query('sessions')
+      .filter((q) => q.eq(q.field('userId'), userId))
+      .collect()
+    for (const s of sessions) await ctx.db.delete(s._id)
+  },
+})
